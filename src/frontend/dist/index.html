@@ -70,7 +70,10 @@ select{padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:
     <button id="btnAdd">添加</button>
     <button id="btnAddCancel">取消</button>
   </div>
-  <div style="margin-top:8px"><a href="javascript:void 0" id="lnkAdd" style="color:var(--acc);text-decoration:none;font-size:12px">＋ 添加自定义 vhdx</a></div>
+  <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
+    <a href="javascript:void 0" id="lnkAdd" style="color:var(--acc);text-decoration:none;font-size:12px">＋ 添加自定义 vhdx</a>
+  </div>
+  <div id="emptyHint" style="display:none;margin-top:8px;padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;color:#92400e;font-size:12px;line-height:1.6"></div>
 </div>
 
 <h2>选项</h2>
@@ -126,6 +129,13 @@ function logLine(msg, cls){
 
 const KIND_LABEL = {wsl:'WSL 发行版','docker-main':'Docker 引擎','docker-data':'Docker 数据','custom':'自定义'};
 
+function showEmptyHint(msg){
+  const el = $('emptyHint');
+  if (rows.length || !msg){ el.style.display='none'; el.textContent=''; return; }
+  el.textContent = msg;
+  el.style.display='block';
+}
+
 function renderRows(){
   const tb = $('tbody'); tb.innerHTML='';
   for (const r of rows){
@@ -138,7 +148,7 @@ function renderRows(){
       <td class="path">${esc(r.vhdx)}</td>`;
     tr.querySelector('input').onchange = e => { r.enabled = e.target.checked; saveCfg(); estimate(); };
     const del = tr.querySelector('.del');
-    if (del) del.onclick = () => { rows = rows.filter(x => x!==r); renderRows(); saveCfg(); estimate(); };
+    if (del) del.onclick = () => { rows = rows.filter(x => x!==r); renderRows(); showEmptyHint(det&&det.error||''); saveCfg(); estimate(); };
     tb.appendChild(tr);
   }
 }
@@ -180,6 +190,7 @@ async function detect(){
     $('reclaimChip').textContent = 'docker 可回收: ' + det.dockerReclaim + (det.dockerRunning?'':'（未运行）');
     $('radOpt').disabled = !det.optimizeVhdAvail;
     $('optHint').textContent = det.optimizeVhdAvail ? '' : '未检测到 Optimize-VHD，不可选';
+    showEmptyHint(det.error || '');
     $('phase').textContent = '空闲';
     renderRows(); saveCfg(); estimate();
   } catch(e){
@@ -284,7 +295,7 @@ $('btnAdd').onclick = () => {
   if (!rows.some(r=>r.vhdx.toLowerCase()===p.toLowerCase())){
     window.go.main.App.StatVhdx(p).then(t => {
       rows.push({name, vhdx:p, kind:'custom', sizeBytes:t.sizeBytes, sizeText:t.sizeText, missing:t.missing, enabled:true, isCustom:true});
-      renderRows(); saveCfg(); estimate();
+      renderRows(); showEmptyHint(''); saveCfg(); estimate();
     });
   }
   $('addName').value=''; $('addPath').value=''; $('addRow').style.display='none';

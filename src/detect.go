@@ -91,7 +91,26 @@ func runDetect() DetectResult {
 	// 4. Optimize-VHD 可用性（较慢，PowerShell 冷启动）
 	res.OptimizeVHDAvail = optimizeVHDAvailable()
 
+	// 5. 目标为空时给出原因提示（前端在空表处显示）
+	if len(res.Targets) == 0 {
+		switch {
+		case lxssKeyExists():
+			res.Error = "未检测到 WSL 发行版或 Docker Desktop 的 vhdx。若已安装，请先启动一次使其注册；也可在下方「＋ 添加自定义 vhdx」手动指定路径。"
+		default:
+			res.Error = "未检测到 WSL（注册表 Lxss 不存在）且未找到 Docker Desktop。可安装 WSL2 后重试，或通过「＋ 添加自定义 vhdx」手动指定要压缩的 vhdx 文件。"
+		}
+	}
 	return res
+}
+
+// lxssKeyExists 判断当前用户 Lxss 注册表键是否存在（区分"没装 WSL"和"装了但没有发行版"）
+func lxssKeyExists() bool {
+	k, err := registryOpenKey(`Software\Microsoft\Windows\CurrentVersion\Lxss`)
+	if err != nil {
+		return false
+	}
+	k.Close()
+	return true
 }
 
 // wslSparseSupported 已废弃：WSL 对已有非稀疏 VHD 转 sparse 要求 --allow-unsafe（有数据风险），功能已移除

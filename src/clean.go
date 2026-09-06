@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -200,21 +201,52 @@ func stepWslShutdown() {
 	if err != nil {
 		logf("  wsl --shutdown: %v %s", err, out)
 	}
-	// 轮询等待（最多 ~30s）：wsl --list --running 输出无发行版名
+	// 轮询等待（最多 ~30s）：
+	//   1) wsl.exe 不存在（未安装 WSL）→ 直接返回，不再误报"已关闭"
+	//   2) `wsl --list --running` 返回非 0 或输出不含任意发行版名 → 已关闭
+	//     （不硬编码关键词匹配发行版名——fedora/Alpine 等会被漏判；
+	//      "没有正在运行的发行版"时 wsl 返回非 0，本条件即可覆盖）
 	for i := 0; i < 15; i++ {
 		time.Sleep(2 * time.Second)
 		out, err := runCmdCombined("wsl.exe", "--list", "--running")
-		t := strings.ToLower(out)
-		// 正常输出包含 NUL 清理后的发行版名；无发行版时 wsl 返回非 0 或输出提示文字
-		hasDistro := strings.Contains(t, "docker") || strings.Contains(t, "ubuntu") ||
-			strings.Contains(t, "debian") || strings.Contains(t, "kali") ||
-			strings.Contains(t, "suse") || strings.Contains(t, "arch")
-		if err != nil || !hasDistro {
+		if !wslInstalled() {
+			logf("  未检测到 wsl.exe（未安装 WSL），跳过关闭步骤")
+			return
+		}
+		t := strings.TrimSpace(out)
+		// 有发行版在跑：wsl 正常列出名字（标题行 + 名称，非空且不是"没有运行"类提示）
+		running := err == nil && t != "" && !noRunningDistroHint(t)
+		if !running {
 			logf("  WSL 已完全关闭（%.0fs）", float64(i+1)*2)
 			return
 		}
 	}
 	logf("  等待超时，继续执行")
+}
+
+// noRunningDistroHint 判断输出是否为"没有正在运行的发行版"提示（中英文）
+func noRunningDistroHint(out string) bool {
+	t := strings.ToLower(out)
+	return strings.Contains(t, "没有正在运行") || strings.Contains(t, "no running") ||
+		strings.Contains(t, "任何实用工具") || strings.Contains(t, "utility")
+}
+
+// wslInstalled wsl.exe 是否存在（WindowsApps 可能不在 PATH，用 where 定位一次并缓存）
+var wslInstalledCache atomic.Bool
+
+func wslInstalled() bool {
+	if wslInstalledCache.Load() {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "where.exe", "wsl.exe")
+	hideWindow(cmd)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	wslInstalledCache.Store(true)
+	return true
 }
 
 // compactOne 压缩单个 vhdx
