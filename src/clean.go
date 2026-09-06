@@ -231,18 +231,14 @@ func noRunningDistroHint(out string) bool {
 		strings.Contains(t, "任何实用工具") || strings.Contains(t, "utility")
 }
 
-// wslInstalled wsl.exe 是否存在（WindowsApps 可能不在 PATH，用 where 定位一次并缓存）
+// wslInstalled wsl.exe 是否存在（复用 findOnPath，结果缓存）
 var wslInstalledCache atomic.Bool
 
 func wslInstalled() bool {
 	if wslInstalledCache.Load() {
 		return true
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "where.exe", "wsl.exe")
-	hideWindow(cmd)
-	if err := cmd.Run(); err != nil {
+	if findOnPath("wsl.exe") == "" {
 		return false
 	}
 	wslInstalledCache.Store(true)

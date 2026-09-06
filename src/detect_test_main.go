@@ -11,6 +11,8 @@ import (
 func main() {
 	res := runDetect()
 	fmt.Println("targets:", len(res.Targets), "reclaim:", res.DockerReclaim)
+	fmt.Printf("WSL: version=%q exe=%q\n", res.WSLVersion, res.WSLExe)
+	fmt.Printf("DockerDesktop: version=%q exe=%q\n", res.DockerVersion, res.DesktopExe)
 	// 验证编码：wsl --list 输出解码后应无 \x00 且含可读发行版名
 	out, _ := runCmdCombined("wsl.exe", "--list", "--verbose")
 	fmt.Printf("WSL-OUTPUT(%d bytes, hasNUL=%v): %q\n", len(out), containsNUL(out), firstLine(out))

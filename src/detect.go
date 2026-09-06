@@ -34,6 +34,9 @@ type DetectResult struct {
 	DockerRunning    bool     `json:"dockerRunning"`
 	OptimizeVHDAvail bool     `json:"optimizeVhdAvail"` // Optimize-VHD (Hyper-V 模块) 是否可用
 	DesktopExe       string   `json:"desktopExe"`       // Docker Desktop.exe 路径（探测失败为空）
+	WSLVersion       string   `json:"wslVersion"`        // 如 "2.7.3.0"，未安装为空
+	WSLExe           string   `json:"wslExe"`            // wsl.exe 完整路径（where 定位）
+	DockerVersion    string   `json:"dockerVersion"`    // Docker Desktop 版本，如 "4.89.0"，未安装为空
 	DetectedAt       string   `json:"detectedAt"`
 	Error            string   `json:"error,omitempty"`
 }
@@ -89,10 +92,14 @@ func runDetect() DetectResult {
 	// 3. docker 可回收空间
 	res.DockerReclaim, res.DockerRunning = dockerReclaimable()
 
-	// 4. Docker Desktop.exe 路径（重启用）
+	// 4. Docker Desktop.exe 路径（重启用）+ 版本号
 	res.DesktopExe = locateDockerDesktopExe()
+	res.DockerVersion = dockerDesktopVersion()
 
-	// 5. Optimize-VHD 可用性（较慢，PowerShell 冷启动）
+	// 5. WSL 版本 + wsl.exe 路径
+	res.WSLVersion, res.WSLExe = wslInfo()
+
+	// 6. Optimize-VHD 可用性（较慢，PowerShell 冷启动）
 	res.OptimizeVHDAvail = optimizeVHDAvailable()
 
 	// 5. 目标为空时给出原因提示（前端在空表处显示）
@@ -275,6 +282,73 @@ func locateDockerDesktopExe() string {
 		return p
 	}
 	return ""
+}
+
+// wslInfo 返回 WSL 版本号（如 "2.7.3.0"）和 wsl.exe 完整路径；未安装时均为空
+func wslInfo() (version, exe string) {
+	// wsl.exe 路径：where 定位（WindowsApps 可能不在 PATH，先探一次）
+	exe = findOnPath("wsl.exe")
+	if exe == "" {
+		return "", ""
+	}
+	// 版本：wsl --version 首行 "WSL 版本: 2.7.3.0"（或英文 "WSL version: ..."）
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "wsl.exe", "--version")
+	hideWindow(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", exe
+	}
+	for _, line := range strings.Split(decodeConsoleBytes(out), "\n") {
+		t := strings.TrimSpace(line)
+		low := strings.ToLower(t)
+		if strings.HasPrefix(low, "wsl 版本") || strings.HasPrefix(low, "wsl version") {
+			if i := strings.Index(t, ":"); i >= 0 {
+				if v := strings.TrimSpace(t[i+1:]); v != "" {
+					return v, exe
+				}
+			}
+		}
+	}
+	return "", exe
+}
+
+// findOnPath 用 where.exe 定位可执行文件完整路径；找不到返回 ""
+func findOnPath(name string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "where.exe", name)
+	hideWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	// where 可能返回多行（PATH 里多个匹配），取第一个存在的
+	for _, line := range strings.Split(decodeConsoleBytes(out), "\n") {
+		if p := strings.TrimSpace(line); p != "" && fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// dockerDesktopVersion 从卸载信息注册表读 Docker Desktop 版本（DisplayVersion）
+func dockerDesktopVersion() string {
+	k, err := registryOpenHKLM(`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop`)
+	if err != nil {
+		return ""
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue("DisplayVersion")
+	if err != nil || v == "" {
+		// 老版本只有 Version 字段
+		if v2, _, err2 := k.GetStringValue("Version"); err2 == nil {
+			return v2
+		}
+		return ""
+	}
+	return v
 }
 
 func dockerWslDirFromSettings() string {

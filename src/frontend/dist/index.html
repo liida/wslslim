@@ -57,6 +57,11 @@ select{padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:
   <button id="btnDetect" style="margin-left:auto">重新探测</button>
 </div>
 
+<div class="card statusbar" id="verbar" style="margin-top:8px;font-size:12px">
+  <span id="wslVerBox"><span class="muted">WSL:</span> <span id="wslVer" title="">—</span></span>
+  <span id="ddVerBox"><span class="muted">Docker Desktop:</span> <span id="ddVer" title="">—</span></span>
+</div>
+
 <h2>清理目标</h2>
 <div class="card">
   <table id="tbl">
@@ -193,6 +198,13 @@ async function detect(){
     for (const c of oldCustom) if (!rows.some(r=>r.vhdx===c.vhdx)) rows.push(c);
     $('detectTime').textContent = '探测于 ' + det.detectedAt;
     $('reclaimChip').textContent = 'docker 可回收: ' + det.dockerReclaim + (det.dockerRunning?'':'（未运行）');
+    // 版本信息：标题悬浮显示程序路径
+    $('wslVer').textContent = det.wslVersion || '未安装';
+    $('wslVer').title = det.wslExe || '';
+    $('wslVer').style.color = det.wslVersion ? '' : 'var(--warn)';
+    $('ddVer').textContent = det.dockerVersion || '未安装';
+    $('ddVer').title = det.desktopExe || '';
+    $('ddVer').style.color = det.dockerVersion ? '' : 'var(--warn)';
     $('radOpt').disabled = !det.optimizeVhdAvail;
     $('optHint').textContent = det.optimizeVhdAvail ? '' : '未检测到 Optimize-VHD，不可选';
     showEmptyHint(det.error || '');
