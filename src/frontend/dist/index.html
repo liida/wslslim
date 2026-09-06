@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>WSLSlim</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--line:#e2e5ea;--txt:#1f2430;--sub:#6b7280;--acc:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--txt);font-size:13px;padding:14px 16px 20px}
+h2{font-size:13px;color:var(--sub);margin:14px 0 6px;font-weight:600;letter-spacing:.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.statusbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+button{padding:5px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;font-size:13px}
+button:hover{border-color:var(--acc);color:var(--acc)}
+button:disabled{opacity:.45;cursor:not-allowed}
+#btnStart{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600;padding:8px 0;width:100%;font-size:14px;margin-top:4px}
+#btnStart:hover:not(:disabled){background:#1d4ed8}
+#btnStart:disabled{background:#9db8e8;border-color:#9db8e8}
+#btnSkip{color:var(--warn);border-color:var(--warn)}
+table{width:100%;border-collapse:collapse}
+th{font-size:12px;color:var(--sub);text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);font-weight:500}
+td{padding:6px 8px;border-bottom:1px solid #f0f2f5;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.path{color:var(--sub);font-size:12px;word-break:break-all;font-family:Consolas,monospace}
+.muted{color:var(--sub)}
+.missing{color:var(--err)}
+#addRow{display:none;gap:6px;margin-top:8px}
+#addRow input{flex:1;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px}
+#addRow button{padding:5px 12px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px 18px}
+label.chk{display:flex;align-items:center;gap:7px;cursor:pointer}
+.methods{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+#log{background:#0f172a;color:#cbd5e1;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.55;border-radius:8px;padding:10px 12px;height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+#log .t{color:#64748b}
+#log .err{color:#fca5a5}
+#log .ok{color:#86efac}
+#results{margin-top:10px}
+.rrow{display:flex;justify-content:space-between;gap:10px;padding:5px 2px;border-bottom:1px dashed var(--line);flex-wrap:wrap}
+.rrow:last-child{border-bottom:none}
+.rrow .freed{color:var(--ok);font-weight:600}
+.rrow .fail{color:var(--err)}
+.rtotal{margin-top:6px;font-weight:700;color:var(--ok);font-size:14px;text-align:right}
+.step{margin-left:10px;color:var(--acc);font-weight:600}
+input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px}
+select{padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px}
+#reclaimChip{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:3px 10px;border-radius:12px;font-weight:600}
+.spin{display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="card statusbar">
+  <span class="muted" id="detectTime">未探测</span>
+  <span id="reclaimChip" title="docker system df 可回收（含 build cache）">docker 可回收: —</span>
+  <span class="muted" id="elevState">提权: ?</span>
+  <button id="btnDetect" style="margin-left:auto">重新探测</button>
+</div>
+
+<h2>清理目标</h2>
+<div class="card">
+  <table id="tbl">
+    <thead><tr><th style="width:36px"></th><th style="width:170px">名称</th><th style="width:110px">类型</th><th style="width:100px">大小</th><th>vhdx 路径</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="addRow">
+    <input id="addName" placeholder="名称（可留空，默认"自定义目标"）" style="width:190px">
+    <input id="addPath" placeholder="点击右侧「浏览…」选择 vhdx 文件" readonly style="flex:1;cursor:pointer;background:#f8f9fa">
+    <button id="btnBrowse">浏览…</button>
+    <button id="btnAdd">添加</button>
+    <button id="btnAddCancel">取消</button>
+  </div>
+  <div style="margin-top:8px"><a href="javascript:void 0" id="lnkAdd" style="color:var(--acc);text-decoration:none;font-size:12px">＋ 添加自定义 vhdx</a></div>
+</div>
+
+<h2>选项</h2>
+<div class="card">
+  <div class="opts">
+    <label class="chk"><input type="checkbox" id="optPrune">清理前 docker prune</label>
+    <label class="chk"><input type="checkbox" id="optPruneAll">连同未使用镜像 (-a)</label>
+    <label class="chk"><input type="checkbox" id="optStop" checked>自动关闭 Docker Desktop</label>
+    <label class="chk"><input type="checkbox" id="optRestart" checked>完成后重启 Docker Desktop</label>
+  </div>
+  <div class="methods" style="margin-top:10px">
+    <span class="muted">压缩方式:</span>
+    <label class="chk"><input type="radio" name="method" value="diskpart" checked>diskpart（系统自带）</label>
+    <label class="chk"><input type="radio" name="method" value="optimize-vhd" id="radOpt">Optimize-VHD（需 Hyper-V）</label>
+    <span class="muted" id="optHint" style="margin-left:auto;font-size:12px"></span>
+  </div>
+</div>
+
+<button id="btnStart">开始清理</button>
+<div style="display:flex;gap:10px;margin-top:8px;align-items:center">
+  <span class="muted" id="phase" style="font-size:12px">空闲</span>
+  <button id="btnSkip" style="margin-left:auto;display:none">跳过剩余步骤</button>
+</div>
+
+<h2>日志</h2>
+<div id="log"><span class="muted">等待操作…</span></div>
+
+<div class="card" id="results" style="display:none">
+  <div id="rrows"></div>
+  <div class="rtotal" id="rtotal"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let det = null;      // DetectResult
+let rows = [];        // 目标行状态 {name, vhdx, kind, sizeText, sizeBytes, missing, enabled, isCustom}
+let cleaning = false;
+
+function fmtBytes(n){ if(n<0) return '—'; const u=['B','KB','MB','GB','TB']; let f=n,i=0; while(f>=1024&&i<4){f/=1024;i++} return f.toFixed(2)+' '+u[i]; }
+function esc(s){ return (s??'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function logLine(msg, cls){
+  const el = $('log');
+  if (el.dataset.clear==='1'){ el.innerHTML=''; el.dataset.clear='0'; }
+  const t = new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  const div = document.createElement('div');
+  if (cls) div.className = cls;
+  const ts = document.createElement('span'); ts.className='t'; ts.textContent = t+' ';
+  div.appendChild(ts); div.appendChild(document.createTextNode(msg));
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+const KIND_LABEL = {wsl:'WSL 发行版','docker-main':'Docker 引擎','docker-data':'Docker 数据','custom':'自定义'};
+
+function renderRows(){
+  const tb = $('tbody'); tb.innerHTML='';
+  for (const r of rows){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" ${r.enabled?'checked':''} ${r.missing?'disabled':''}></td>
+      <td>${esc(r.name)}</td>
+      <td class="muted">${KIND_LABEL[r.kind]||r.kind}${r.isCustom?' <a href="javascript:void 0" class="del" style="color:var(--err);text-decoration:none;font-size:11px">✕</a>':''}</td>
+      <td class="${r.missing?'missing':''}">${r.missing?'不存在':fmtBytes(r.sizeBytes)}</td>
+      <td class="path">${esc(r.vhdx)}</td>`;
+    tr.querySelector('input').onchange = e => { r.enabled = e.target.checked; saveCfg(); estimate(); };
+    const del = tr.querySelector('.del');
+    if (del) del.onclick = () => { rows = rows.filter(x => x!==r); renderRows(); saveCfg(); estimate(); };
+    tb.appendChild(tr);
+  }
+}
+
+function collectTargets(){
+  return rows.map(r => ({name:r.name, vhdx:r.vhdx, enabled:r.enabled && !r.missing, kind:r.kind}));
+}
+
+// 预计可释放 = docker RECLAIMABLE + 各启用 vhdx 的"虚胖"估算（无精确手段，仅提示）
+function estimate(){
+  const el = $('btnStart');
+  let dockerGB = 0;
+  if (det && det.dockerReclaim && det.dockerReclaim !== '—'){
+    const m = det.dockerReclaim.match(/([\d.]+)\s*(B|KB|MB|GB|TB)/i);
+    if (m){ const mult={B:1,KB:1/1024,MB:1/(1024*1024),GB:1,TB:1024}; dockerGB = parseFloat(m[1])*mult[m[2].toUpperCase()]; }
+  }
+  const anyDocker = rows.some(r=>r.enabled&&!r.missing&&(r.kind==='docker-main'||r.kind==='docker-data'));
+  const anyWsl = rows.some(r=>r.enabled&&!r.missing&&r.kind==='wsl');
+  const parts = [];
+  if (dockerGB>0) parts.push(`docker prune ~${dockerGB.toFixed(1)}GB`);
+  if (anyDocker||anyWsl) parts.push('vhdx 压缩（视内部空闲而定）');
+  el.textContent = parts.length ? `开始清理（预计可释放 ${parts.join(' + ')}）` : '开始清理';
+}
+
+async function detect(){
+  $('btnDetect').disabled = true; $('btnDetect').textContent = '探测中…';
+  $('phase').textContent = '探测中…';
+  try {
+    det = await window.go.main.App.Detect();
+    // 保留用户自定义条目与 enabled 状态
+    const oldCustom = rows.filter(r=>r.isCustom);
+    const oldEn = {}; rows.forEach(r=>oldEn[r.vhdx]=r.enabled);
+    rows = det.targets.map(t => ({
+      name:t.name, vhdx:t.vhdx, kind:t.kind, sizeBytes:t.sizeBytes, sizeText:t.sizeText,
+      missing:t.missing, enabled: oldEn[t.vhdx]!==undefined ? oldEn[t.vhdx] : true, isCustom:false
+    }));
+    for (const c of oldCustom) if (!rows.some(r=>r.vhdx===c.vhdx)) rows.push(c);
+    $('detectTime').textContent = '探测于 ' + det.detectedAt;
+    $('reclaimChip').textContent = 'docker 可回收: ' + det.dockerReclaim + (det.dockerRunning?'':'（未运行）');
+    $('radOpt').disabled = !det.optimizeVhdAvail;
+    $('optHint').textContent = det.optimizeVhdAvail ? '' : '未检测到 Optimize-VHD，不可选';
+    $('phase').textContent = '空闲';
+    renderRows(); saveCfg(); estimate();
+  } catch(e){
+    logLine('探测失败: ' + e, 'err'); $('phase').textContent = '探测失败';
+  }
+  $('btnDetect').disabled = false; $('btnDetect').textContent = '重新探测';
+}
+
+function saveCfg(){
+  const cfg = {
+    targets: collectTargets(),
+    docker: {
+      mainVhdx: (rows.find(r=>r.kind==='docker-main')||{}).vhdx || '',
+      dataVhdx: (rows.find(r=>r.kind==='docker-data')||{}).vhdx || '',
+      enabled: rows.some(r=>r.enabled&&(r.kind==='docker-main'||r.kind==='docker-data')),
+      pruneBefore: $('optPrune').checked, pruneAll: $('optPruneAll').checked,
+      stopDesktop: $('optStop').checked, restartAfter: $('optRestart').checked,
+      desktopExe: 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'
+    },
+    compactMethod: document.querySelector('input[name=method]:checked').value
+  };
+  window.go.main.App.SaveConfig(cfg);
+}
+
+async function loadCfg(){
+  try {
+    const cfg = await window.go.main.App.GetConfig();
+    if (cfg.docker){
+      $('optPrune').checked = !!cfg.docker.pruneBefore;
+      $('optPruneAll').checked = !!cfg.docker.pruneAll;
+      $('optStop').checked = cfg.docker.stopDesktop!==false;
+      $('optRestart').checked = cfg.docker.restartAfter!==false;
+    }
+    if (cfg.compactMethod==='optimize-vhd'){ const r=$('radOpt'); if(r&&!r.disabled) r.checked=true; }
+  } catch(e){}
+}
+
+async function startClean(){
+  if (cleaning) return;
+  const targets = collectTargets();
+  if (!targets.some(t=>t.enabled) && !$('optPrune').checked){ alert('请至少启用一个目标'); return; }
+  const enabled = targets.filter(t=>t.enabled);
+  const names = enabled.map(t=>t.name).join('、');
+  const msg = `即将执行：\n` +
+    ($('optPrune').checked ? `  • docker prune${$('optPruneAll').checked?'（含未使用镜像 -a）':''}（会删除停止的容器/未使用网络/构建缓存/未使用卷）\n`:'') +
+    ($('optStop').checked ? `  • 关闭 Docker Desktop\n`:'') +
+    (enabled.length ? `  • wsl --shutdown（所有 WSL 发行版将关闭！）\n  • 压缩: ${names}\n`:'') +
+    ($('optRestart').checked ? `  • 重启 Docker Desktop\n`:'') +
+    `\n确认执行？`;
+  if (!confirm(msg)) return;
+  const opts = {
+    targets,
+    pruneBefore: $('optPrune').checked, pruneAll: $('optPruneAll').checked,
+    stopDesktop: $('optStop').checked, restartAfter: $('optRestart').checked,
+    desktopExe: 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe',
+    method: document.querySelector('input[name=method]:checked').value
+  };
+  cleaning = true;
+  $('btnStart').disabled = true; $('btnSkip').style.display='inline-block';
+  $('results').style.display='none';
+  $('log').dataset.clear='1';
+  $('phase').textContent = '清理中…';
+  const ok = await window.go.main.App.StartClean(opts);
+  if (!ok){ cleaning=false; $('btnStart').disabled=false; $('btnSkip').style.display='none'; $('phase').textContent='空闲'; }
+}
+
+window.runtime.EventsOn('log', (msg) => {
+  logLine(String(msg));
+  const m = String(msg).match(/^\[(\d)\/6\]|^===== 清理开始/);
+  if (m) $('phase').textContent = '步骤 ' + msg.slice(0, 30);
+  if (/失败|错误/.test(String(msg))) logLine('', ''); // noop 占位，避免误删
+});
+window.runtime.EventsOn('done', (data) => {
+  cleaning = false;
+  $('btnStart').disabled = false; $('btnSkip').style.display='none';
+  $('phase').textContent = '完成';
+  const rs = data.results || [];
+  const box = $('rrows'); box.innerHTML='';
+  for (const r of rs){
+    const d = document.createElement('div'); d.className='rrow';
+    d.innerHTML = `<span>${esc(r.name)}</span><span>${esc(r.beforeText)} → ${esc(r.afterText)}</span><span class="${r.ok?'freed':'fail'}">${r.ok?('释放 '+esc(r.freedText)):'失败'}</span>`;
+    box.appendChild(d);
+  }
+  $('rtotal').textContent = '总计释放: ' + (data.total||'0 B');
+  $('results').style.display = rs.length ? 'block' : 'none';
+});
+
+// ---- 事件绑定 ----
+$('btnDetect').onclick = detect;
+$('btnStart').onclick = startClean;
+$('btnSkip').onclick = () => { window.go.main.App.SkipRest(); logLine('（将在当前步骤完成后跳过剩余步骤）'); };
+$('lnkAdd').onclick = () => { $('addRow').style.display='flex'; $('btnBrowse').focus(); };
+$('btnAddCancel').onclick = () => { $('addRow').style.display='none'; };
+$('btnBrowse').onclick = async () => {
+  const p = await window.go.main.App.PickVhdx();
+  if (p) $('addPath').value = p;
+};
+$('btnAdd').onclick = () => {
+  const name = $('addName').value.trim() || '自定义目标';
+  const p = $('addPath').value.trim();
+  if (!p){ alert('请先点击「浏览…」选择一个 vhdx 文件'); return; }
+  if (!rows.some(r=>r.vhdx.toLowerCase()===p.toLowerCase())){
+    window.go.main.App.StatVhdx(p).then(t => {
+      rows.push({name, vhdx:p, kind:'custom', sizeBytes:t.sizeBytes, sizeText:t.sizeText, missing:t.missing, enabled:true, isCustom:true});
+      renderRows(); saveCfg(); estimate();
+    });
+  }
+  $('addName').value=''; $('addPath').value=''; $('addRow').style.display='none';
+};
+for (const id of ['optPrune','optPruneAll','optStop','optRestart'])
+  $(id).addEventListener('change', saveCfg);
+document.querySelectorAll('input[name=method]').forEach(r => r.addEventListener('change', saveCfg));
+
+// ---- 初始化 ----
+(async () => {
+  $('elevState').textContent = '提权: ' + (await window.go.main.App.IsElevated() ? '已提权 ✓' : '否');
+  logLine('WSLSlim 就绪。点击「重新探测」扫描目标。');
+  await loadCfg();
+  await detect();
+})();
+</script>
+</body>
+</html>

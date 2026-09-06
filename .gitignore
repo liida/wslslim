@@ -1,0 +1,20 @@
+# 构建产物（仅根目录 dist/，不影响 src/frontend/dist 前端源码）
+/dist/
+
+# Go
+*.exe
+*.test
+*.out
+
+# 日志
+*.log
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统
+Thumbs.db
+.DS_Store
