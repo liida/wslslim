@@ -33,6 +33,7 @@ type DetectResult struct {
 	DockerReclaim    string   `json:"dockerReclaim"`    // 如 "21.46 GB"，不可用为 "—"
 	DockerRunning    bool     `json:"dockerRunning"`
 	OptimizeVHDAvail bool     `json:"optimizeVhdAvail"` // Optimize-VHD (Hyper-V 模块) 是否可用
+	DesktopExe       string   `json:"desktopExe"`       // Docker Desktop.exe 路径（探测失败为空）
 	DetectedAt       string   `json:"detectedAt"`
 	Error            string   `json:"error,omitempty"`
 }
@@ -88,7 +89,10 @@ func runDetect() DetectResult {
 	// 3. docker 可回收空间
 	res.DockerReclaim, res.DockerRunning = dockerReclaimable()
 
-	// 4. Optimize-VHD 可用性（较慢，PowerShell 冷启动）
+	// 4. Docker Desktop.exe 路径（重启用）
+	res.DesktopExe = locateDockerDesktopExe()
+
+	// 5. Optimize-VHD 可用性（较慢，PowerShell 冷启动）
 	res.OptimizeVHDAvail = optimizeVHDAvailable()
 
 	// 5. 目标为空时给出原因提示（前端在空表处显示）
@@ -223,6 +227,54 @@ func locateDockerVhdx() (mainVhdx, dataVhdx string) {
 		}
 	}
 	return
+}
+
+// locateDockerDesktopExe 自动探测 Docker Desktop.exe（按可靠性排序）：
+//  1. 卸载信息注册表 InstallLocation（HKLM，最可靠）
+//  2. App Paths 注册表（HKLM）
+//  3. Docker Desktop 正在运行时，从其进程路径反查（安装位置再偏也能找到）
+//  4. 默认安装路径兜底
+func locateDockerDesktopExe() string {
+	const rel = `Docker Desktop.exe`
+
+	// 1. HKLM\...\Uninstall\Docker Desktop 的 InstallLocation
+	if k, err := registryOpenHKLM(`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop`); err == nil {
+		loc, _, err := k.GetStringValue("InstallLocation")
+		k.Close()
+		if loc != "" && err == nil {
+			if p := filepath.Join(loc, rel); fileExists(p) {
+				return p
+			}
+		}
+	}
+
+	// 2. App Paths（explorer/ShellExecute 用的就是这个）
+	if k, err := registryOpenHKLM(`SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Docker Desktop.exe`); err == nil {
+		p, _, err := k.GetStringValue("")
+		k.Close()
+		if p != "" && err == nil && fileExists(p) {
+			return p
+		}
+	}
+
+	// 3. 从运行中的 Docker Desktop 进程反查（tasklist /v 不好取路径，直接 tasklist+位置不可行；
+	//    用 powershell Get-Process 反查，未运行/无 docker 时 8s 超时返回空，开销可接受）
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+		"(Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue | Select-Object -First 1).Path")
+	hideWindow(cmd)
+	if out, err := cmd.Output(); err == nil {
+		if p := strings.TrimSpace(decodeConsoleBytes(out)); p != "" && fileExists(p) {
+			return p
+		}
+	}
+
+	// 4. 默认路径兜底
+	if p := filepath.Join(`C:\Program Files`, "Docker", "Docker", rel); fileExists(p) {
+		return p
+	}
+	return ""
 }
 
 func dockerWslDirFromSettings() string {

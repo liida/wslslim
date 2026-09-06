@@ -129,6 +129,11 @@ function logLine(msg, cls){
 
 const KIND_LABEL = {wsl:'WSL 发行版','docker-main':'Docker 引擎','docker-data':'Docker 数据','custom':'自定义'};
 
+// Docker Desktop.exe：优先用后端探测结果，未探测到时回退默认路径
+function desktopExe(){
+  return (det && det.desktopExe) || 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
+}
+
 function showEmptyHint(msg){
   const el = $('emptyHint');
   if (rows.length || !msg){ el.style.display='none'; el.textContent=''; return; }
@@ -208,7 +213,7 @@ function saveCfg(){
       enabled: rows.some(r=>r.enabled&&(r.kind==='docker-main'||r.kind==='docker-data')),
       pruneBefore: $('optPrune').checked, pruneAll: $('optPruneAll').checked,
       stopDesktop: $('optStop').checked, restartAfter: $('optRestart').checked,
-      desktopExe: 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'
+      desktopExe: desktopExe()
     },
     compactMethod: document.querySelector('input[name=method]:checked').value
   };
@@ -245,7 +250,7 @@ async function startClean(){
     targets,
     pruneBefore: $('optPrune').checked, pruneAll: $('optPruneAll').checked,
     stopDesktop: $('optStop').checked, restartAfter: $('optRestart').checked,
-    desktopExe: 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe',
+    desktopExe: desktopExe(),
     method: document.querySelector('input[name=method]:checked').value
   };
   cleaning = true;
